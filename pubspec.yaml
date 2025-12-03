@@ -38,6 +38,7 @@ dependencies:
   mobile_scanner: ^5.1.0                # Quét QR thật (Hỗ trợ cả Camera & Ảnh)
   image_picker: ^1.0.7                  # Chọn ảnh từ thư viện
   permission_handler: ^11.3.0
+  http: ^1.1.0
 
 
 dev_dependencies:
