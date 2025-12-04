@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:ui'; // UI Blur
@@ -6,7 +8,9 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart'; // Để bắt lỗi PlatformException
 import 'package:flutter_notification_listener/flutter_notification_listener.dart';
 import 'package:mobile_scanner/mobile_scanner.dart'; // REAL QR SCANNER
-import 'package:image_picker/image_picker.dart';     // REAL IMAGE PICKER
+import 'package:image_picker/image_picker.dart'; // REAL IMAGE PICKER
+import 'package:http/http.dart' as http;
+
 // ĐÃ XÓA import 'dart:io'; vì nó gây lỗi trên Web
 
 // --- 1. BACKGROUND SERVICE (REAL DATA) ---
@@ -44,6 +48,7 @@ class LinkScannerApp extends StatelessWidget {
 
 // --- 3. MODELS ---
 enum AppSource { zalo, messenger, manual, qr, image }
+
 enum ScanStatus { safe, malicious, scanning, unknown }
 
 class ScanLog {
@@ -83,7 +88,10 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _radarController = AnimationController(vsync: this, duration: const Duration(seconds: 4));
+    _radarController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    );
 
     // Tự động chạy giả lập nếu là Web để test UI
     if (kIsWeb) {
@@ -118,15 +126,18 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
     if (pkg != null) {
       if (pkg.contains("zalo")) src = AppSource.zalo;
-      if (pkg.contains("orca") || pkg.contains("messenger")) src = AppSource.messenger;
+      if (pkg.contains("orca") || pkg.contains("messenger"))
+        src = AppSource.messenger;
     }
 
     if (src == null || event.message == null) return;
 
     String? link = _extractLink(event.message!);
     if (link != null) {
-      if (logs.isNotEmpty && logs.first.link == link &&
-          DateTime.now().difference(logs.first.time).inSeconds < 2) return;
+      if (logs.isNotEmpty &&
+          logs.first.link == link &&
+          DateTime.now().difference(logs.first.time).inSeconds < 2)
+        return;
       _addLog(event.title ?? "Unknown", event.message!, link, src);
     }
   }
@@ -137,11 +148,34 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   }
 
   Future<ScanStatus> checkUrlWithGoogleSafeBrowsing(String url) async {
-    // TODO: Connect Real API Here
-    await Future.delayed(const Duration(seconds: 1));
-    bool isBad = url.contains("virus") || url.contains("hack") || url.contains("http://");
-    return isBad ? ScanStatus.malicious : ScanStatus.safe;
+  const apiKey = "AIzaSyCblqIrEpozkWbxDj9emCqGbiPe1Oe0MG8";
+  final endpoint = Uri.parse(
+      'https://safebrowsing.googleapis.com/v4/threatMatches:find?key=$apiKey');
+
+  final body = jsonEncode({
+    "client": {"clientId": "LinkGuard", "clientVersion": "1.0"},
+    "threatInfo": {
+      "threatTypes": ["MALWARE","SOCIAL_ENGINEERING","UNWANTED_SOFTWARE","POTENTIALLY_HARMFUL_APPLICATION"],
+      "platformTypes": ["ANY_PLATFORM"],
+      "threatEntryTypes": ["URL"],
+      "threatEntries": [{"url": url}]
+    }
+  });
+
+  try {
+    final response = await http.post(endpoint, headers: {"Content-Type": "application/json"}, body: body);
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data["matches"] == null ? ScanStatus.safe : ScanStatus.malicious;
+    } else {
+      print("GSB API Error: ${response.statusCode} ${response.body}");
+      return ScanStatus.unknown;
+    }
+  } catch (e) {
+    print("GSB Exception: $e");
+    return ScanStatus.unknown;
   }
+}
 
   void _addLog(String sender, String content, String link, AppSource src) {
     final newLog = ScanLog(
@@ -162,8 +196,15 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       if (status == ScanStatus.malicious) {
         _showAlert(newLog);
       } else {
-        if (src == AppSource.manual || src == AppSource.qr || src == AppSource.image) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Link Safe!"), backgroundColor: Colors.green));
+        if (src == AppSource.manual ||
+            src == AppSource.qr ||
+            src == AppSource.image) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Link Safe!"),
+              backgroundColor: Colors.green,
+            ),
+          );
         }
       }
     });
@@ -174,7 +215,10 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       // Trên Web chỉ giả lập bật tắt
       setState(() {
         _isRunning = !_isRunning;
-        if (_isRunning) _radarController.repeat(); else _radarController.stop();
+        if (_isRunning)
+          _radarController.repeat();
+        else
+          _radarController.stop();
       });
       return;
     }
@@ -186,9 +230,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
         return;
       }
       await NotificationsListener.startService(
-          foreground: false,
-          title: "LinkGuard Active",
-          description: "Scanning..."
+        foreground: false,
+        title: "LinkGuard Active",
+        description: "Scanning...",
       );
       _radarController.repeat();
     } else {
@@ -201,13 +245,19 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   // Giả lập tin nhắn trên Web để test
   void _simulateMessage() {
     if (!_isRunning) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please enable protection first!")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enable protection first!")),
+      );
       return;
     }
     bool isBad = Random().nextBool();
     String link = isBad ? "http://hack-acc.com/login" : "https://youtube.com";
-    _addLog("Test User (Web)", "Check this link: $link", link,
-        Random().nextBool() ? AppSource.zalo : AppSource.messenger);
+    _addLog(
+      "Test User (Web)",
+      "Check this link: $link",
+      link,
+      Random().nextBool() ? AppSource.zalo : AppSource.messenger,
+    );
   }
 
   void _showAlert(ScanLog log) {
@@ -251,7 +301,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
                         logs: logs,
                         radarController: _radarController,
                         onToggle: _toggleService,
-                        onSimulate: _simulateMessage, // Truyền hàm giả lập cho Web
+                        onSimulate:
+                            _simulateMessage, // Truyền hàm giả lập cho Web
                         isWide: isWide,
                       ),
                       ManualScanView(
@@ -293,11 +344,16 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
               Text(
                 "LINKGUARD",
                 style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.5,
-                    shadows: [Shadow(color: const Color(0xFF00E5FF).withOpacity(0.8), blurRadius: 10)]
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                  shadows: [
+                    Shadow(
+                      color: const Color(0xFF00E5FF).withOpacity(0.8),
+                      blurRadius: 10,
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -305,9 +361,15 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
           if (kIsWeb)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(4)),
-              child: const Text("WEB MODE", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-            )
+              decoration: BoxDecoration(
+                color: Colors.orange,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                "WEB MODE",
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+            ),
         ],
       ),
     );
@@ -351,27 +413,57 @@ class DashboardView extends StatelessWidget {
                   RotationTransition(
                     turns: radarController,
                     child: Container(
-                      width: 220, height: 220,
+                      width: 220,
+                      height: 220,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        gradient: SweepGradient(colors: [const Color(0xFF00E5FF).withOpacity(0), const Color(0xFF00E5FF).withOpacity(0.5)]),
+                        gradient: SweepGradient(
+                          colors: [
+                            const Color(0xFF00E5FF).withOpacity(0),
+                            const Color(0xFF00E5FF).withOpacity(0.5),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 Container(
-                  width: 180, height: 180,
+                  width: 180,
+                  height: 180,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: Colors.black.withOpacity(0.5),
-                    border: Border.all(color: isRunning ? const Color(0xFF00E5FF) : Colors.red, width: 2),
-                    boxShadow: [BoxShadow(color: (isRunning ? const Color(0xFF00E5FF) : Colors.red).withOpacity(0.3), blurRadius: 30)],
+                    border: Border.all(
+                      color: isRunning ? const Color(0xFF00E5FF) : Colors.red,
+                      width: 2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (isRunning
+                                ? const Color(0xFF00E5FF)
+                                : Colors.red)
+                            .withOpacity(0.3),
+                        blurRadius: 30,
+                      ),
+                    ],
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(isRunning ? Icons.radar : Icons.power_settings_new, size: 50, color: isRunning ? const Color(0xFF00E5FF) : Colors.red),
+                      Icon(
+                        isRunning ? Icons.radar : Icons.power_settings_new,
+                        size: 50,
+                        color: isRunning ? const Color(0xFF00E5FF) : Colors.red,
+                      ),
                       const SizedBox(height: 10),
-                      Text(isRunning ? "SCANNING" : "INACTIVE", style: TextStyle(color: isRunning ? const Color(0xFF00E5FF) : Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
+                      Text(
+                        isRunning ? "SCANNING" : "INACTIVE",
+                        style: TextStyle(
+                          color:
+                              isRunning ? const Color(0xFF00E5FF) : Colors.red,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -379,7 +471,10 @@ class DashboardView extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          Text(isRunning ? "Tap to STOP" : "Tap to ACTIVATE", style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text(
+            isRunning ? "Tap to STOP" : "Tap to ACTIVATE",
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
 
           // Nút giả lập cho Web
           if (kIsWeb && onSimulate != null) ...[
@@ -388,26 +483,56 @@ class DashboardView extends StatelessWidget {
               onPressed: onSimulate,
               icon: const Icon(Icons.bug_report),
               label: const Text("SIMULATE MESSAGE (WEB TEST)"),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-            )
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+            ),
           ],
 
           const SizedBox(height: 30),
 
           Row(
             children: [
-              Expanded(child: _StatCard(label: "SAFE", count: safeCount, color: Colors.green)),
+              Expanded(
+                child: _StatCard(
+                  label: "SAFE",
+                  count: safeCount,
+                  color: Colors.green,
+                ),
+              ),
               const SizedBox(width: 15),
-              Expanded(child: _StatCard(label: "THREATS", count: badCount, color: Colors.red)),
+              Expanded(
+                child: _StatCard(
+                  label: "THREATS",
+                  count: badCount,
+                  color: Colors.red,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 20),
-          if (logs.isNotEmpty) Column(children: logs.take(3).map((l) => LogTile(log: l)).toList())
-          else Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(border: Border.all(color: Colors.white10), borderRadius: BorderRadius.circular(15)),
-            child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.history, color: Colors.white30), SizedBox(width: 10), Text("No recent events", style: TextStyle(color: Colors.white30))]),
-          ),
+          if (logs.isNotEmpty)
+            Column(children: logs.take(3).map((l) => LogTile(log: l)).toList())
+          else
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white10),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.history, color: Colors.white30),
+                  SizedBox(width: 10),
+                  Text(
+                    "No recent events",
+                    style: TextStyle(color: Colors.white30),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -474,15 +599,19 @@ class _ManualScanViewState extends State<ManualScanView> {
 
   void _showRestartWarning() {
     ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Native Plugin Error: Please restart the app (Hot Restart doesn't load new plugins)."),
-          backgroundColor: Colors.red,
-        )
+      const SnackBar(
+        content: Text(
+          "Native Plugin Error: Please restart the app (Hot Restart doesn't load new plugins).",
+        ),
+        backgroundColor: Colors.red,
+      ),
     );
   }
 
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
   @override
@@ -494,18 +623,33 @@ class _ManualScanViewState extends State<ManualScanView> {
         children: [
           const Icon(Icons.qr_code_scanner, size: 80, color: Colors.white24),
           const SizedBox(height: 20),
-          const Text("MANUAL SCAN", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-          const Text("Enter URL, Scan QR or Import Image", style: TextStyle(color: Colors.white54)),
+          const Text(
+            "MANUAL SCAN",
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+          const Text(
+            "Enter URL, Scan QR or Import Image",
+            style: TextStyle(color: Colors.white54),
+          ),
           const SizedBox(height: 40),
 
           TextField(
             controller: _ctrl,
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
-              filled: true, fillColor: Colors.white.withOpacity(0.1),
-              hintText: "Enter URL (https://...)", hintStyle: const TextStyle(color: Colors.white30),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.1),
+              hintText: "Enter URL (https://...)",
+              hintStyle: const TextStyle(color: Colors.white30),
               prefixIcon: const Icon(Icons.link, color: Colors.white54),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
             ),
           ),
           const SizedBox(height: 20),
@@ -518,8 +662,15 @@ class _ManualScanViewState extends State<ManualScanView> {
                   _ctrl.clear();
                 }
               },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E5FF), foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(vertical: 16)),
-              child: const Text("CHECK NOW", style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00E5FF),
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: const Text(
+                "CHECK NOW",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
           ),
           const SizedBox(height: 20),
@@ -530,7 +681,11 @@ class _ManualScanViewState extends State<ManualScanView> {
                   onPressed: _openQRScanner, // CALL REAL FUNCTION
                   icon: const Icon(Icons.camera_alt),
                   label: const Text("SCAN QR"),
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: Colors.white30)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    side: const BorderSide(color: Colors.white30),
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -539,7 +694,11 @@ class _ManualScanViewState extends State<ManualScanView> {
                   onPressed: _pickFromGallery, // CALL REAL FUNCTION
                   icon: const Icon(Icons.image),
                   label: const Text("GALLERY"),
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16), side: const BorderSide(color: Colors.white30)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    side: const BorderSide(color: Colors.white30),
+                  ),
                 ),
               ),
             ],
@@ -557,7 +716,10 @@ class RealQRScannerScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Scan QR Code"), backgroundColor: Colors.black),
+      appBar: AppBar(
+        title: const Text("Scan QR Code"),
+        backgroundColor: Colors.black,
+      ),
       body: MobileScanner(
         controller: MobileScannerController(
           detectionSpeed: DetectionSpeed.noDuplicates,
@@ -581,8 +743,15 @@ class HistoryView extends StatelessWidget {
   const HistoryView({super.key, required this.logs});
   @override
   Widget build(BuildContext context) {
-    if (logs.isEmpty) return const Center(child: Text("No scan history", style: TextStyle(color: Colors.white30)));
-    return ListView.builder(padding: const EdgeInsets.all(20), itemCount: logs.length, itemBuilder: (ctx, i) => LogTile(log: logs[i]));
+    if (logs.isEmpty)
+      return const Center(
+        child: Text("No scan history", style: TextStyle(color: Colors.white30)),
+      );
+    return ListView.builder(
+      padding: const EdgeInsets.all(20),
+      itemCount: logs.length,
+      itemBuilder: (ctx, i) => LogTile(log: logs[i]),
+    );
   }
 }
 
@@ -592,8 +761,14 @@ class LogTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color color = log.status == ScanStatus.safe ? Colors.green : (log.status == ScanStatus.malicious ? Colors.red : Colors.orange);
-    IconData icon = log.status == ScanStatus.safe ? Icons.check_circle : (log.status == ScanStatus.malicious ? Icons.warning : Icons.sync);
+    Color color =
+        log.status == ScanStatus.safe
+            ? Colors.green
+            : (log.status == ScanStatus.malicious ? Colors.red : Colors.orange);
+    IconData icon =
+        log.status == ScanStatus.safe
+            ? Icons.check_circle
+            : (log.status == ScanStatus.malicious ? Icons.warning : Icons.sync);
     String sourceText = log.source.toString().split('.').last.toUpperCase();
 
     return Container(
@@ -601,13 +776,43 @@ class LogTile extends StatelessWidget {
       child: GlassBox(
         child: Row(
           children: [
-            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: color.withOpacity(0.2), shape: BoxShape.circle), child: Icon(icon, color: color, size: 20)),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.2),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
             const SizedBox(width: 12),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(log.sender, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              Text(log.link, style: TextStyle(color: Colors.blue[200], fontSize: 12, decoration: TextDecoration.underline), maxLines: 1, overflow: TextOverflow.ellipsis),
-            ])),
-            Text(sourceText, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    log.sender,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    log.link,
+                    style: TextStyle(
+                      color: Colors.blue[200],
+                      fontSize: 12,
+                      decoration: TextDecoration.underline,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              sourceText,
+              style: const TextStyle(color: Colors.white54, fontSize: 10),
+            ),
           ],
         ),
       ),
@@ -622,31 +827,99 @@ class DangerAlert extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(30),
-      decoration: const BoxDecoration(color: Color(0xFF1E0505), borderRadius: BorderRadius.vertical(top: Radius.circular(30)), border: Border(top: BorderSide(color: Colors.red, width: 2))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.gpp_bad, color: Colors.red, size: 60),
-        const SizedBox(height: 20),
-        const Text("WARNING!", style: TextStyle(color: Colors.red, fontSize: 24, fontWeight: FontWeight.bold)),
-        const Text("Malicious link detected.", style: TextStyle(color: Colors.white70)),
-        const SizedBox(height: 20),
-        Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8)), child: Text(log.link, style: const TextStyle(color: Colors.redAccent))),
-        const SizedBox(height: 30),
-        SizedBox(width: double.infinity, child: ElevatedButton(onPressed: () => Navigator.pop(context), style: ElevatedButton.styleFrom(backgroundColor: Colors.red, padding: const EdgeInsets.all(16)), child: const Text("GOT IT - BLOCK NOW", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white))))
-      ]),
+      decoration: const BoxDecoration(
+        color: Color(0xFF1E0505),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        border: Border(top: BorderSide(color: Colors.red, width: 2)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.gpp_bad, color: Colors.red, size: 60),
+          const SizedBox(height: 20),
+          const Text(
+            "WARNING!",
+            style: TextStyle(
+              color: Colors.red,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const Text(
+            "Malicious link detected.",
+            style: TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.black,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              log.link,
+              style: const TextStyle(color: Colors.redAccent),
+            ),
+          ),
+          const SizedBox(height: 30),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                padding: const EdgeInsets.all(16),
+              ),
+              child: const Text(
+                "GOT IT - BLOCK NOW",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _StatCard extends StatelessWidget {
-  final String label; final int count; final Color color;
-  const _StatCard({required this.label, required this.count, required this.color});
+  final String label;
+  final int count;
+  final Color color;
+  const _StatCard({
+    required this.label,
+    required this.count,
+    required this.color,
+  });
   @override
   Widget build(BuildContext context) {
-    return GlassBox(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11)),
-      const SizedBox(height: 5),
-      Text("$count", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 24))
-    ]));
+    return GlassBox(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.bold,
+              fontSize: 11,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            "$count",
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 24,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -655,24 +928,51 @@ class GlassBox extends StatelessWidget {
   const GlassBox({super.key, required this.child});
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(borderRadius: BorderRadius.circular(16), child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), child: Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.white.withOpacity(0.1))), child: child)));
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.white.withOpacity(0.1)),
+          ),
+          child: child,
+        ),
+      ),
+    );
   }
 }
 
 // --- CẬP NHẬT NAV BAR (SỬA LỖI TAB KHÔNG NHẠY) ---
 class GlassNavBar extends StatelessWidget {
-  final int currentIndex; final Function(int) onTap;
-  const GlassNavBar({super.key, required this.currentIndex, required this.onTap});
+  final int currentIndex;
+  final Function(int) onTap;
+  const GlassNavBar({
+    super.key,
+    required this.currentIndex,
+    required this.onTap,
+  });
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.all(20), height: 70,
-      decoration: BoxDecoration(color: const Color(0xFF1E293B).withOpacity(0.8), borderRadius: BorderRadius.circular(35), border: Border.all(color: Colors.white.withOpacity(0.1))),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-        _item(0, Icons.dashboard, "HOME"),
-        _item(1, Icons.qr_code_scanner, "MANUAL"),
-        _item(2, Icons.history, "HISTORY"),
-      ]),
+      margin: const EdgeInsets.all(20),
+      height: 70,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B).withOpacity(0.8),
+        borderRadius: BorderRadius.circular(35),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _item(0, Icons.dashboard, "HOME"),
+          _item(1, Icons.qr_code_scanner, "MANUAL"),
+          _item(2, Icons.history, "HISTORY"),
+        ],
+      ),
     );
   }
 
@@ -681,24 +981,43 @@ class GlassNavBar extends StatelessWidget {
     bool active = currentIndex == index;
     return Expanded(
       child: GestureDetector(
-          onTap: () => onTap(index),
-          behavior: HitTestBehavior.opaque,
-          child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: active ? BoxDecoration(color: const Color(0xFF00E5FF).withOpacity(0.2), borderRadius: BorderRadius.circular(20)) : null,
-                    child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(icon, color: active ? const Color(0xFF00E5FF) : Colors.white54),
-                          if (active) ...[const SizedBox(width: 8), Text(label, style: const TextStyle(color: Color(0xFF00E5FF), fontWeight: FontWeight.bold, fontSize: 12))]
-                        ]
-                    )
-                )
-              ]
-          )
+        onTap: () => onTap(index),
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration:
+                  active
+                      ? BoxDecoration(
+                        color: const Color(0xFF00E5FF).withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      )
+                      : null,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    icon,
+                    color: active ? const Color(0xFF00E5FF) : Colors.white54,
+                  ),
+                  if (active) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        color: Color(0xFF00E5FF),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
