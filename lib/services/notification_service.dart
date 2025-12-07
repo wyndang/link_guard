@@ -24,6 +24,9 @@ class NotificationService {
     _isInitialized = true;
 
     try {
+      // Request notification permission for Android 13+
+      await requestNotificationPermission();
+
       // Setup method channel to receive notifications from native Android
       platform.setMethodCallHandler((call) async {
         if (call.method == 'onNotificationReceived') {
@@ -207,6 +210,20 @@ class NotificationService {
       print("Error showing malicious notification: $e");
     }
   }
-}
-    
+
+  /// Request notification permission (Android 13+)
+  static Future<bool> requestNotificationPermission() async {
+    if (kIsWeb) return false;
+
+    try {
+      final bool granted =
+          await platform.invokeMethod('requestNotificationPermission');
+      print('✓ Notification permission requested: $granted');
+      return granted;
+    } catch (e) {
+      print("Error requesting notification permission: $e");
+      return false;
+    }
+  }
+}   
 

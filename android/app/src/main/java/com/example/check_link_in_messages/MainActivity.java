@@ -60,6 +60,11 @@ public class MainActivity extends FlutterActivity {
                     result.success(null);
                     break;
 
+                case "requestNotificationPermission":
+                    requestNotificationPermissionRuntime();
+                    result.success(true);
+                    break;
+
                 default:
                     result.notImplemented();
             }
@@ -170,15 +175,34 @@ public class MainActivity extends FlutterActivity {
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setAutoCancel(true)
                 .setVibrate(new long[]{0, 500, 250, 500})
-                .setLights(0xFFFF0000, 500, 500);
+                .setLights(0xFFFF0000, 500, 500)
+                .setTimeoutAfter(5000);  // Auto-dismiss after 5 seconds
             
             // Show notification
             NotificationManagerCompat notificationManager = NotificationManagerCompat.from(this);
-            notificationManager.notify((int) System.currentTimeMillis(), builder.build());
+            int notificationId = (int) System.currentTimeMillis();
+            notificationManager.notify(notificationId, builder.build());
             
             android.util.Log.d(TAG, "Malicious link notification shown: " + title);
+            
+            // Optional: Auto-cancel after 5 seconds programmatically
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                notificationManager.cancel(notificationId);
+                android.util.Log.d(TAG, "Notification auto-dismissed after 5 seconds");
+            }, 5000);
+            
         } catch (Exception e) {
             android.util.Log.e(TAG, "Error showing malicious notification", e);
+        }
+    }
+
+    /**
+     * Request notification permission for Android 13+
+     */
+    private void requestNotificationPermissionRuntime() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            String[] permissions = {"android.permission.POST_NOTIFICATIONS"};
+            requestPermissions(permissions, 123);
         }
     }
 
