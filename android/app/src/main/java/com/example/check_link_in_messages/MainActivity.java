@@ -6,6 +6,9 @@ import io.flutter.plugin.common.MethodChannel;
 import android.content.Intent;
 import android.provider.Settings;
 import android.os.Build;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+import android.app.NotificationChannel;
 
 /**
  * Main activity for LinkGuard app
@@ -46,6 +49,15 @@ public class MainActivity extends FlutterActivity {
                 case "isNotificationListenerEnabled":
                     boolean isEnabled = isNotificationListenerEnabled();
                     result.success(isEnabled);
+                    break;
+
+                case "showMaliciousNotification":
+                    String sender = call.argument("sender");
+                    String link = call.argument("link");
+                    String title = call.argument("title");
+                    String message = call.argument("message");
+                    showMaliciousLinkNotification(sender, link, title, message);
+                    result.success(null);
                     break;
 
                 default:
@@ -120,6 +132,54 @@ public class MainActivity extends FlutterActivity {
         }
 
         return enabledNotificationListeners.contains(componentName);
+    }
+
+    /**
+     * Show push notification for malicious link detected
+     */
+    private void showMaliciousLinkNotification(String sender, String link, String title, String message) {
+        try {
+            String channelId = "malicious_link_channel";
+            
+            // Create notification channel for Android 8+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationChannel channel = new NotificationChannel(
+                    channelId,
+                    "Malicious Links",
+                    android.app.NotificationManager.IMPORTANCE_HIGH
+                );
+                channel.setDescription("Notifications for detected malicious links");
+                channel.enableVibration(true);
+                channel.enableLights(true);
+                
+                android.app.NotificationManager notificationManager = 
+                    getSystemService(android.app.NotificationManager.class);
+                if (notificationManager != null) {
+                    notificationManager.createNotificationChannel(channel);
+                }
+            }
+            
+            // Build notification
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setStyle(new NotificationCompat.BigTextStyle()
+                    .bigText("Link: " + link + "\n\nFrom: " + sender))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .setVibrate(new long[]{0, 500, 250, 500})
+                .setLights(0xFFFF0000, 500, 500);
+            
+            // Show notification
+            NotificationManagerCompat notificationManager = NotificationManagerCompat.from(this);
+            notificationManager.notify((int) System.currentTimeMillis(), builder.build());
+            
+            android.util.Log.d(TAG, "Malicious link notification shown: " + title);
+        } catch (Exception e) {
+            android.util.Log.e(TAG, "Error showing malicious notification", e);
+        }
     }
 
     /**

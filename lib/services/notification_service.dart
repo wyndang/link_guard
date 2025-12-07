@@ -187,6 +187,26 @@ class NotificationService {
       print("❌ [ERROR] Error simulating notification: $e");
     }
   }
+
+  /// Show push notification for malicious link
+  static Future<void> showMaliciousLinkNotification(
+    String sender,
+    String link,
+  ) async {
+    if (kIsWeb) return;
+
+    try {
+      await platform.invokeMethod('showMaliciousNotification', {
+        'sender': sender,
+        'link': link,
+        'title': '🚨 Malicious Link Detected',
+        'message': 'A malicious link from $sender was blocked',
+      });
+      print('📢 Malicious link notification sent');
+    } catch (e) {
+      print("Error showing malicious notification: $e");
+    }
+  }
 }
     
 

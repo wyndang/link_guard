@@ -93,6 +93,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
       if (status == ScanStatus.malicious) {
         print('   ⚠️ MALICIOUS link detected!');
+        NotificationService.showMaliciousLinkNotification(sender, link);
         _showDangerAlert(newLog);
       } else if (source == AppSource.manual ||
           source == AppSource.qr ||
