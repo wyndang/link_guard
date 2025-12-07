@@ -14,6 +14,13 @@ subprojects {
 }
 subprojects {
     project.evaluationDependsOn(":app")
+    
+    // Bypass symlink requirement for flutter plugins
+    tasks.configureEach {
+        if (name.contains("generateLocalizationsBuild")) {
+            dependsOn.clear()
+        }
+    }
 }
 
 tasks.register<Delete>("clean") {

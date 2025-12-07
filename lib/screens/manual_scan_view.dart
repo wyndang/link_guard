@@ -1,10 +1,16 @@
 /// Manual URL scanning screen (manual, QR, gallery)
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:image/image.dart' as img;
+import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart'
+    as mlkit;
 import '../models/models.dart';
 import '../config/theme.dart';
+import '../services/url_scan_service.dart';
 import 'qr_scanner_screen.dart';
 
 /// View for manual URL scanning with QR and gallery options
@@ -41,7 +47,13 @@ class _ManualScanViewState extends State<ManualScanView> {
       );
 
       if (result != null && result is String) {
-        widget.onScan(result, AppSource.qr);
+        // Check if QR code output is a valid link
+        String? link = UrlScanService.detectAndNormalizeLink(result);
+        if (link != null) {
+          widget.onScan(link, AppSource.qr);
+        } else {
+          _showError("QR Code doesn't contain a valid URL.\nContent: $result");
+        }
       }
     } on MissingPluginException {
       _showRestartWarning();
@@ -57,24 +69,45 @@ class _ManualScanViewState extends State<ManualScanView> {
           await _picker.pickImage(source: ImageSource.gallery);
       if (image == null) return;
 
-      final controller = MobileScannerController();
-      final BarcodeCapture? capture = await controller.analyzeImage(image.path);
+      _showError("Processing image...");
 
-      if (capture != null && capture.barcodes.isNotEmpty) {
-        final String? code = capture.barcodes.first.rawValue;
-        if (code != null) {
-          widget.onScan(code, AppSource.image);
+      // Use Google MLKit for reliable QR decoding
+      final barcodeScanner = mlkit.BarcodeScanner(
+        formats: [mlkit.BarcodeFormat.qrCode],
+      );
+      final inputImage = mlkit.InputImage.fromFilePath(image.path);
+
+      try {
+        final barcodes = await barcodeScanner.processImage(inputImage);
+
+        if (barcodes.isNotEmpty) {
+          // Get first QR code detected
+          final qrCode = barcodes.first.displayValue;
+
+          if (qrCode != null && qrCode.isNotEmpty) {
+            // Check if QR code output is a valid link
+            final link = UrlScanService.detectAndNormalizeLink(qrCode);
+            if (link != null) {
+              widget.onScan(link, AppSource.image);
+            } else {
+              _showError("QR Code doesn't contain a valid URL.\nContent: $qrCode");
+            }
+          } else {
+            _showError("QR code is empty.");
+          }
         } else {
-          _showError("QR Code found but empty.");
+          _showError("No QR code found in this image.");
         }
-      } else {
-        _showError("No QR Code found in this image.");
+
+        await barcodeScanner.close();
+      } catch (e) {
+        _showError("Failed to decode QR: $e");
+        await barcodeScanner.close();
       }
-      controller.dispose();
     } on MissingPluginException {
       _showRestartWarning();
     } catch (e) {
-      _showError("Error analyzing image: $e");
+      _showError("Error processing image: $e");
     }
   }
 
@@ -158,9 +191,20 @@ class _ManualScanViewState extends State<ManualScanView> {
       width: widget.isWide ? 300 : double.infinity,
       child: ElevatedButton(
         onPressed: () {
-          if (_urlController.text.isNotEmpty) {
-            widget.onScan(_urlController.text, AppSource.manual);
+          if (_urlController.text.isEmpty) {
+            _showError("Please enter a URL");
+            return;
+          }
+
+          // Detect and normalize the link from input
+          String? link =
+              UrlScanService.detectAndNormalizeLink(_urlController.text);
+          if (link != null) {
+            widget.onScan(link, AppSource.manual);
             _urlController.clear();
+          } else {
+            _showError(
+                "Invalid URL format. Please enter a valid link.");
           }
         },
         style: ElevatedButton.styleFrom(

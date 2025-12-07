@@ -1,5 +1,6 @@
 /// Main screen with tab navigation
 import 'dart:math';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../models/models.dart';
@@ -62,6 +63,12 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
   /// Add new scan log and check URL
   void _addLog(String sender, String content, String link, AppSource source) {
+    print('📱 [LOG ADDED] New message caught:');
+    print('   - From: $sender');
+    print('   - Content: $content');
+    print('   - Link: $link');
+    print('   - Source: $source');
+
     final newLog = ScanLog(
       id: DateTime.now().toString(),
       sender: sender,
@@ -74,16 +81,23 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
     setState(() => logs.insert(0, newLog));
 
+    print('   ✓ Log added to history (total: ${logs.length})');
+
     // Check URL safety
+    print('   🔍 Checking URL with Google Safe Browsing...');
     UrlScanService.checkUrl(link).then((status) {
       if (!mounted) return;
       setState(() => newLog.status = status);
 
+      print('   ✓ Check complete. Status: $status');
+
       if (status == ScanStatus.malicious) {
+        print('   ⚠️ MALICIOUS link detected!');
         _showDangerAlert(newLog);
       } else if (source == AppSource.manual ||
           source == AppSource.qr ||
           source == AppSource.image) {
+        print('   ✓ Safe link - user can proceed');
         _showSafeNotification();
       }
     });
@@ -104,11 +118,45 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     }
 
     if (!_isRunning) {
-      bool granted = await NotificationService.hasPermission();
-      if (!granted) {
-        await NotificationService.openPermissionSettings();
-        return;
+      // Check if notification listener is enabled
+      try {
+        bool isEnabled = await NotificationService.isNotificationListenerEnabled();
+        
+        if (!isEnabled) {
+          print("⚠️ Notification listener not enabled");
+          // Show dialog explaining the requirement
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => AlertDialog(
+                title: const Text('Enable Notification Listener'),
+                content: const Text(
+                  'To detect messages from Zalo and Messenger, you need to enable '
+                  'the notification listener for this app. '
+                  '\n\nTap "Enable" to go to the settings.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      NotificationService.requestNotificationListenerPermission();
+                    },
+                    child: const Text('Enable'),
+                  ),
+                ],
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        print("Error checking notification listener: $e");
       }
+      
       await NotificationService.startService();
       _radarController.repeat();
     } else {
@@ -121,22 +169,43 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
   /// Simulate message for Web testing
   void _simulateMessage() {
+    print('🧪 [TEST] Simulating message from Messenger/Zalo...');
+    
     if (!_isRunning) {
+      print('   ⚠️ Protection not enabled');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enable protection first!")),
       );
       return;
     }
 
+    // Generate random test message
     bool isBad = Random().nextBool();
-    String link =
-        isBad ? "http://hack-acc.com/login" : "https://youtube.com";
+    String link = isBad 
+        ? "http://phishing-site.xyz/login?token=fake" 
+        : "https://youtube.com/watch?v=dQw4w9WgXcQ";
+    
+    AppSource source = Random().nextBool() ? AppSource.zalo : AppSource.messenger;
+    
+    String senderName = source == AppSource.zalo ? "Zalo Bot" : "Facebook Messenger";
+    String messageContent = isBad 
+        ? "Hi! Verify your account: $link" 
+        : "Check out this video: $link";
+
+    print('   📨 Simulated message:');
+    print('   - From: $senderName');
+    print('   - Content: $messageContent');
+    print('   - Link: $link');
+    print('   - Type: ${isBad ? "MALICIOUS" : "SAFE"}');
+
     _addLog(
-      "Test User (Web)",
-      "Check this link: $link",
+      senderName,
+      messageContent,
       link,
-      Random().nextBool() ? AppSource.zalo : AppSource.messenger,
+      source,
     );
+    
+    print('   ✓ Message added to history');
   }
 
   /// Show danger alert for malicious URL
