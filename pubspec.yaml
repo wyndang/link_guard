@@ -40,6 +40,8 @@ dependencies:
   http: ^1.1.0
   image: ^4.0.0                         # For image processing
   google_mlkit_barcode_scanning: ^0.10.0 # Reliable barcode/QR decoder
+  sqflite: ^2.3.0                        # Local SQLite database
+  path_provider: ^2.1.0                  # Get app document directory
 
 
 dev_dependencies:

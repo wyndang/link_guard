@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../config/theme.dart';
 import '../services/url_scan_service.dart';
 import '../services/notification_service.dart';
+import '../services/database_service.dart';
 import '../widgets/index.dart';
 import 'index.dart';
 
@@ -39,6 +40,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     }
 
     _initNotificationListener();
+    _loadHistoryFromDatabase();
   }
 
   @override
@@ -61,6 +63,17 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     });
   }
 
+  /// Load scan history from local database
+  Future<void> _loadHistoryFromDatabase() async {
+    try {
+      final dbLogs = await DatabaseService().getAllLogs();
+      setState(() => logs = dbLogs);
+      print('✓ Loaded ${dbLogs.length} logs from database');
+    } catch (e) {
+      print('❌ Error loading logs from database: $e');
+    }
+  }
+
   /// Add new scan log and check URL
   void _addLog(String sender, String content, String link, AppSource source) {
     print('📱 [LOG ADDED] New message caught:');
@@ -81,6 +94,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
 
     setState(() => logs.insert(0, newLog));
 
+    // Save to local database
+    DatabaseService().insertScanLog(newLog);
+
     print('   ✓ Log added to history (total: ${logs.length})');
 
     // Check URL safety
@@ -88,6 +104,9 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     UrlScanService.checkUrl(link).then((status) {
       if (!mounted) return;
       setState(() => newLog.status = status);
+
+      // Update status in database
+      DatabaseService().updateLogStatus(newLog.id, status);
 
       print('   ✓ Check complete. Status: $status');
 
