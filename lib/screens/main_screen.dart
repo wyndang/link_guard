@@ -24,6 +24,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   bool _isRunning = false;
   List<ScanLog> logs = [];
   late AnimationController _radarController;
+  late Function(String, String, String, AppSource) _notificationCallback;
 
   @override
   void initState() {
@@ -39,7 +40,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       _radarController.repeat();
     }
 
-    _initNotificationListener();
+    // Setup the notification callback (but don't initialize listener yet)
+    _setupNotificationCallback();
     _loadHistoryFromDatabase();
   }
 
@@ -49,18 +51,31 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  /// Initialize background notification listener
-  Future<void> _initNotificationListener() async {
-    await NotificationService.initialize((sender, content, link, source) {
+  /// Setup the callback function for when notifications arrive
+  void _setupNotificationCallback() {
+    _notificationCallback = (sender, content, link, source) {
+      // Only process if service is running
+      if (!_isRunning) {
+        print('⚠️ [IGNORED] Service not running, ignoring notification');
+        return;
+      }
+
       // Duplicate check: ignore same link within 2 seconds
       if (logs.isNotEmpty &&
           logs.first.link == link &&
           DateTime.now().difference(logs.first.time).inSeconds <
               AppConstants.duplicateCheckWindow) {
+        print('⚠️ [IGNORED] Duplicate message within 2 seconds');
         return;
       }
+
       _addLog(sender, content, link, source);
-    });
+    };
+  }
+
+  /// Initialize background notification listener (call only when toggle is ON)
+  Future<void> _initNotificationListener() async {
+    await NotificationService.initialize(_notificationCallback);
   }
 
   /// Load scan history from local database
@@ -138,7 +153,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
     }
 
     if (!_isRunning) {
-      // Check if notification listener is enabled
+      // Turning ON - check if notification listener is enabled
       try {
         bool isEnabled = await NotificationService.isNotificationListenerEnabled();
         
@@ -172,19 +187,26 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
               ),
             );
           }
+          return; // Don't turn on if not enabled
         }
       } catch (e) {
         print("Error checking notification listener: $e");
       }
       
-      await NotificationService.startService();
+      // Initialize listener NOW that service is being turned on
+      print('🔄 Starting notification listener...');
+      await _initNotificationListener();
+      
       _radarController.repeat();
+      setState(() => _isRunning = true);
+      print('✅ Protection ENABLED - now listening to messages');
     } else {
+      // Turning OFF
       await NotificationService.stopService();
       _radarController.stop();
+      setState(() => _isRunning = false);
+      print('❌ Protection DISABLED - stopped listening');
     }
-
-    setState(() => _isRunning = !_isRunning);
   }
 
   /// Simulate message for Web testing

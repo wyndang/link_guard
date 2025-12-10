@@ -1,12 +1,25 @@
 /// URL scanning service using Google Safe Browsing API
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../models/models.dart';
 
 class UrlScanService {
-  static const String _apiKey = "AIzaSyCblqIrEpozkWbxDj9emCqGbiPe1Oe0MG8";
-  static const String _endpoint =
-      'https://safebrowsing.googleapis.com/v4/threatMatches:find';
+  static late String _apiKey;
+  static late String _endpoint;
+
+  /// Initialize API credentials from .env file
+  static Future<void> initialize() async {
+    await dotenv.load();
+    _apiKey = dotenv.env['GOOGLE_SAFE_BROWSING_API_KEY'] ?? '';
+    _endpoint = dotenv.env['GOOGLE_SAFE_BROWSING_ENDPOINT'] ?? 
+        'https://safebrowsing.googleapis.com/v4/threatMatches:find';
+    
+    if (_apiKey.isEmpty) {
+      throw Exception('GOOGLE_SAFE_BROWSING_API_KEY not found in .env file');
+    }
+    print('✓ UrlScanService initialized');
+  }
 
   /// Check URL with Google Safe Browsing API
   /// Returns [ScanStatus] indicating if URL is safe, malicious, or unknown
